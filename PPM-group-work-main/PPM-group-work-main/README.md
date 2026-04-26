@@ -6,7 +6,9 @@ The system is designed to:
 - authenticate employees by `employee_id` or demo token,
 - answer payroll-value questions from the dataset,
 - return the latest payslip for an employee when multiple payslip rows exist,
-- and offer HR handoff for unsupported questions.
+- offer HR handoff for unsupported questions,
+- expose runtime health and interaction metrics for demos and monitoring,
+- and remain safe under concurrent requests from the threaded HTTP server.
 
 ## Current Status
 
@@ -28,6 +30,7 @@ The backend currently supports these payroll query types:
 - student loan
 - healthcare scheme
 - total deductions
+- supported-capabilities / help queries
 
 If a user asks something outside those supported payroll queries, the chatbot responds politely and asks whether the user would like to be put in touch with HR. If the user confirms, the request is stored in the HR request database.
 
@@ -69,7 +72,13 @@ The database stores:
 ## API Endpoints
 
 ### `GET /api/health`
-Returns the API health status.
+Returns the API health status plus runtime metadata:
+- service name
+- API start time
+- active data source
+- HR database filename
+- supported employee count
+- pending HR confirmation count
 
 ### `POST /api/chat`
 Authenticates the user and processes payroll chatbot messages.
@@ -85,11 +94,17 @@ Possible routes:
 - `payroll`
 - `security`
 - `request`
+- `guidance`
 - `hr_offer`
 - `hr_escalation`
 
 ### `GET /api/metrics`
 Returns backend interaction metrics:
+- `total_interactions`
+- `automated_interactions`
+- `handoff_interactions`
+- `offer_interactions`
+- `error_interactions`
 - `deflection_rate`
 - `average_response_time`
 - `error_rate`
@@ -108,6 +123,8 @@ token-<employee_id>
 
 Unauthorized requests return a `401` response.
 
+Authentication is normalized so that whitespace and employee ID casing do not prevent valid users from being recognized.
+
 ## Run
 
 ```bash
@@ -118,6 +135,14 @@ The API runs on:
 
 ```text
 http://localhost:8000
+```
+
+Optional environment variables:
+
+```text
+PAYROLL_API_HOST
+PAYROLL_API_PORT
+PAYROLL_API_LOG_LEVEL
 ```
 
 ## Test
@@ -138,6 +163,9 @@ tests/
 
 ## Notes
 
-- This is an API-only backend. The `web/` folder is not used by the current backend server.
+- This repository is backend-only.
 - The chatbot does not guess answers outside the supported payroll fields.
 - HR requests are only stored after the user confirms they want to be put in touch with HR.
+- The payroll workbook cache, HR handoff state, and metrics store are protected for concurrent access.
+- Invalid JSON, oversized request bodies, and empty messages are rejected with explicit API errors.
+
