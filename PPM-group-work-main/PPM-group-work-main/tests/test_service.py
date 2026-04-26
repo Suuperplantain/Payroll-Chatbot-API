@@ -22,7 +22,7 @@ class PayrollSupportServiceTests(unittest.TestCase):
         self.ticket_repo = SQLiteHRRequestRepository(self.hr_db_path)
         self.ticket_repo.clear_requests()
         self.service = PayrollSupportService(
-            auth_service=AuthService(self.payroll_repo.get_supported_employee_ids()),
+            auth_service=AuthService(self.payroll_repo.get_supported_employee_ids),
             nlp_engine=RuleBasedNLPEngine(),
             knowledge_repo=InMemoryKnowledgeRepository(),
             payroll_repo=self.payroll_repo,
@@ -69,6 +69,18 @@ class PayrollSupportServiceTests(unittest.TestCase):
                 self.assertEqual(result.route, "payroll")
                 self.assertEqual(result.data[key], expected)
                 self.assertFalse(result.awaiting_confirmation)
+
+    def test_normalized_employee_id_is_accepted(self) -> None:
+        result = self.service.handle_message(" ntu001 ", "What is my net pay?")
+        self.assertEqual(result.route, "payroll")
+        self.assertEqual(result.data["net_pay"], 3735.0)
+
+    def test_help_query_returns_supported_topics(self) -> None:
+        result = self.service.handle_message("NTU001", "What can you help with?")
+        self.assertEqual(result.route, "guidance")
+        self.assertIn("supported_topics", result.data)
+        self.assertIn("sample_questions", result.data)
+        self.assertFalse(result.awaiting_confirmation)
 
     def test_unknown_query_returns_hr_offer(self) -> None:
         result = self.service.handle_message("NTU001", "Can you tell me my annual leave balance?")

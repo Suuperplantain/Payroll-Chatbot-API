@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime
+from threading import Lock
 
 from .engine import RuleBasedNLPEngine
 from .repositories import (
@@ -29,6 +30,31 @@ class ChatResponse:
     awaiting_confirmation: bool = False
 
 
+SUPPORTED_TOPICS = [
+    "latest payslip summary",
+    "employee details",
+    "tax code",
+    "pay date",
+    "pay period",
+    "gross salary",
+    "net pay",
+    "PAYE tax",
+    "National Insurance",
+    "pension",
+    "student loan",
+    "healthcare scheme",
+    "total deductions",
+]
+
+SAMPLE_QUESTIONS = [
+    "Show me my payslip",
+    "What is my tax code?",
+    "What is my net pay?",
+    "How much National Insurance did I pay?",
+    "What are my total deductions?",
+]
+
+
 class PayrollSupportService:
     def __init__(
         self,
@@ -46,6 +72,7 @@ class PayrollSupportService:
         self.ticket_repo = ticket_repo
         self.metrics_repo = metrics_repo
         self._pending_handoffs: dict[str, PendingHandoff] = {}
+        self._handoff_lock = Lock()
         self._yes_responses = {
             "yes",
             "yeah",
@@ -66,15 +93,16 @@ class PayrollSupportService:
 
     def handle_message(self, employee_id: str, message: str) -> ChatResponse:
         start_time = datetime.now()
+        authorized_employee_id = self.auth_service.validate_credentials(employee_id=employee_id)
 
-        if not self.auth_service.is_authorized(employee_id):
+        if authorized_employee_id is None:
             return self._error_response(
                 start_time,
                 route="security",
                 message="Authentication failed. Please verify your employee ID.",
             )
 
-        snapshot = self.payroll_repo.get_latest_snapshot(employee_id)
+        snapshot = self.payroll_repo.get_latest_snapshot(authorized_employee_id)
         if snapshot is None:
             return self._error_response(
                 start_time,
@@ -82,14 +110,12 @@ class PayrollSupportService:
                 message="No payroll record was found for this employee.",
             )
 
-        pending_handoff = self._pending_handoffs.get(employee_id)
         normalized_message = self._normalize_message(message)
+        pending_handoff = self._consume_pending_handoff(authorized_employee_id)
         if pending_handoff is not None:
             if normalized_message in self._yes_responses:
-                del self._pending_handoffs[employee_id]
-                return self._confirm_hr_handoff(start_time, employee_id, pending_handoff)
+                return self._confirm_hr_handoff(start_time, authorized_employee_id, pending_handoff)
             if normalized_message in self._no_responses:
-                del self._pending_handoffs[employee_id]
                 return self._finalize(
                     start_time,
                     outcome="automated",
@@ -104,9 +130,27 @@ class PayrollSupportService:
                         awaiting_confirmation=False,
                     ),
                 )
-            del self._pending_handoffs[employee_id]
 
         intent = self.nlp_engine.classify(message)
+
+        if intent.intent == "help":
+            guidance_message = self.knowledge_repo.search("supported_payroll_topics") or (
+                "I can help with supported payroll queries from your latest payslip."
+            )
+            return self._finalize(
+                start_time,
+                outcome="automated",
+                response=ChatResponse(
+                    status="ok",
+                    message=guidance_message,
+                    route="guidance",
+                    data={
+                        "supported_topics": SUPPORTED_TOPICS,
+                        "sample_questions": SAMPLE_QUESTIONS,
+                    },
+                    awaiting_confirmation=False,
+                ),
+            )
 
         if intent.intent == "payslip_summary":
             return self._payroll_response(
@@ -215,7 +259,7 @@ class PayrollSupportService:
 
         return self._offer_hr_handoff(
             start_time,
-            employee_id,
+            authorized_employee_id,
             original_message=message,
             reason=f"Intent={intent.intent}",
         )
@@ -241,10 +285,7 @@ class PayrollSupportService:
         original_message: str,
         reason: str,
     ) -> ChatResponse:
-        self._pending_handoffs[employee_id] = PendingHandoff(
-            original_message=original_message,
-            reason=reason,
-        )
+        self._store_pending_handoff(employee_id, original_message, reason)
         return self._finalize(
             start_time,
             outcome="offer",
@@ -319,7 +360,26 @@ class PayrollSupportService:
         self.metrics_repo.record_interaction(outcome=outcome, response_time=response_time)
         return response
 
+    def clear_pending_handoffs(self) -> None:
+        with self._handoff_lock:
+            self._pending_handoffs.clear()
+
+    def get_pending_handoff_count(self) -> int:
+        with self._handoff_lock:
+            return len(self._pending_handoffs)
+
     def _normalize_message(self, message: str) -> str:
         return " ".join(
             "".join(char if char.isalnum() or char.isspace() else " " for char in message.lower()).split()
         )
+
+    def _store_pending_handoff(self, employee_id: str, original_message: str, reason: str) -> None:
+        with self._handoff_lock:
+            self._pending_handoffs[employee_id] = PendingHandoff(
+                original_message=original_message,
+                reason=reason,
+            )
+
+    def _consume_pending_handoff(self, employee_id: str) -> PendingHandoff | None:
+        with self._handoff_lock:
+            return self._pending_handoffs.pop(employee_id, None)

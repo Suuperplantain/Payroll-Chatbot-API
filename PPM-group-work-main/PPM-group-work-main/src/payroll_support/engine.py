@@ -1,6 +1,7 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
 
 @dataclass
@@ -12,46 +13,130 @@ class IntentResult:
 class RuleBasedNLPEngine:
     """Rule-based classifier for supported payroll queries."""
 
+    def __init__(self) -> None:
+        self._intent_patterns: tuple[tuple[str, float, tuple[re.Pattern[str], ...]], ...] = (
+            (
+                "employee_details",
+                0.95,
+                (
+                    re.compile(r"\bemployee details\b"),
+                    re.compile(r"\bmy details\b"),
+                    re.compile(r"\bemployee id\b"),
+                    re.compile(r"\bjob title\b"),
+                    re.compile(r"\bmy name\b"),
+                    re.compile(r"\bwho am i\b"),
+                ),
+            ),
+            ("tax_code", 0.97, (re.compile(r"\btax code\b"),)),
+            (
+                "pay_date",
+                0.96,
+                (
+                    re.compile(r"\bpay date\b"),
+                    re.compile(r"\bpaid on\b"),
+                    re.compile(r"\bwhen was i paid\b"),
+                    re.compile(r"\bwhen did i get paid\b"),
+                    re.compile(r"\bwhen will i be paid\b"),
+                ),
+            ),
+            (
+                "pay_period",
+                0.95,
+                (
+                    re.compile(r"\bpay period\b"),
+                    re.compile(r"\bperiod\b.*\bpay\b"),
+                    re.compile(r"\bpay\b.*\bperiod\b"),
+                ),
+            ),
+            (
+                "gross_salary",
+                0.95,
+                (
+                    re.compile(r"\bgross salary\b"),
+                    re.compile(r"\bgross pay\b"),
+                    re.compile(r"^gross$"),
+                ),
+            ),
+            (
+                "net_pay",
+                0.96,
+                (
+                    re.compile(r"\bnet pay\b"),
+                    re.compile(r"\btake home\b"),
+                    re.compile(r"\btake home pay\b"),
+                    re.compile(r"\btake-home\b"),
+                ),
+            ),
+            (
+                "national_insurance",
+                0.95,
+                (
+                    re.compile(r"\bnational insurance\b"),
+                    re.compile(r"\bni\b"),
+                ),
+            ),
+            ("student_loan", 0.95, (re.compile(r"\bstudent loan\b"),)),
+            (
+                "healthcare_scheme",
+                0.94,
+                (
+                    re.compile(r"\bhealthcare\b"),
+                    re.compile(r"\bhealth care\b"),
+                    re.compile(r"\bmedical deduction\b"),
+                ),
+            ),
+            ("pension", 0.95, (re.compile(r"\bpension\b"),)),
+            (
+                "paye_tax",
+                0.95,
+                (
+                    re.compile(r"\bpaye\b"),
+                    re.compile(r"\btax\b"),
+                ),
+            ),
+            (
+                "total_deductions",
+                0.93,
+                (
+                    re.compile(r"\btotal deductions\b"),
+                    re.compile(r"\bdeductions\b"),
+                    re.compile(r"\bdeduction\b"),
+                ),
+            ),
+            (
+                "help",
+                0.94,
+                (
+                    re.compile(r"^help$"),
+                    re.compile(r"\bwhat can you do\b"),
+                    re.compile(r"\bwhat can you help with\b"),
+                    re.compile(r"\bwhat questions can i ask\b"),
+                    re.compile(r"\bsupported questions\b"),
+                    re.compile(r"\bsupported queries\b"),
+                    re.compile(r"\bsupported topics\b"),
+                ),
+            ),
+            (
+                "payslip_summary",
+                0.90,
+                (
+                    re.compile(r"\bpayslip\b"),
+                    re.compile(r"\bsummary\b"),
+                    re.compile(r"\bsalary\b"),
+                    re.compile(r"\bpayment\b"),
+                    re.compile(r"\bpaid\b"),
+                ),
+            ),
+        )
+
     def classify(self, message: str) -> IntentResult:
-        text = message.lower().strip()
+        text = self._normalize(message)
 
-        if any(keyword in text for keyword in ("employee details", "my details", "employee id", "job title", "my name", "who am i")):
-            return IntentResult(intent="employee_details", confidence=0.95)
-
-        if "tax code" in text:
-            return IntentResult(intent="tax_code", confidence=0.97)
-
-        if any(keyword in text for keyword in ("pay date", "paid on", "when was i paid", "when did i get paid")):
-            return IntentResult(intent="pay_date", confidence=0.96)
-
-        if "pay period" in text or ("period" in text and "pay" in text):
-            return IntentResult(intent="pay_period", confidence=0.95)
-
-        if any(keyword in text for keyword in ("gross salary", "gross pay")) or text == "gross":
-            return IntentResult(intent="gross_salary", confidence=0.95)
-
-        if any(keyword in text for keyword in ("net pay", "take home", "take-home")):
-            return IntentResult(intent="net_pay", confidence=0.96)
-
-        if "national insurance" in text or " ni " in f" {text} ":
-            return IntentResult(intent="national_insurance", confidence=0.95)
-
-        if "student loan" in text:
-            return IntentResult(intent="student_loan", confidence=0.95)
-
-        if "healthcare" in text or "health care" in text:
-            return IntentResult(intent="healthcare_scheme", confidence=0.94)
-
-        if "pension" in text:
-            return IntentResult(intent="pension", confidence=0.95)
-
-        if "paye" in text or ("tax" in text and "tax code" not in text):
-            return IntentResult(intent="paye_tax", confidence=0.95)
-
-        if "deduction" in text:
-            return IntentResult(intent="total_deductions", confidence=0.93)
-
-        if any(keyword in text for keyword in ("payslip", "summary", "salary", "payment", "paid")):
-            return IntentResult(intent="payslip_summary", confidence=0.9)
+        for intent, confidence, patterns in self._intent_patterns:
+            if any(pattern.search(text) for pattern in patterns):
+                return IntentResult(intent=intent, confidence=confidence)
 
         return IntentResult(intent="unknown", confidence=0.4)
+
+    def _normalize(self, message: str) -> str:
+        return " ".join(message.lower().strip().split())

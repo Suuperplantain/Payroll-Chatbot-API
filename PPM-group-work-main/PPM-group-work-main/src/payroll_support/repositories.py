@@ -1,8 +1,10 @@
 ﻿from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from threading import Lock, RLock
 from typing import Protocol
 from zipfile import ZipFile
 import sqlite3
@@ -76,6 +78,10 @@ class HRTicket:
 @dataclass
 class MetricsSummary:
     total_interactions: int
+    automated_interactions: int
+    handoff_interactions: int
+    offer_interactions: int
+    error_interactions: int
     deflection_rate: float
     average_response_time: float
     error_rate: float
@@ -110,8 +116,17 @@ class MetricsRepository(Protocol):
 
 
 class InMemoryKnowledgeRepository:
+    def __init__(self) -> None:
+        self._entries = {
+            "supported_payroll_topics": (
+                "I can help with your latest payslip summary, employee details, tax code, pay date, "
+                "pay period, gross salary, net pay, PAYE tax, National Insurance, pension, student loan, "
+                "healthcare scheme deductions, and total deductions."
+            )
+        }
+
     def search(self, query: str) -> str | None:
-        return None
+        return self._entries.get(query.strip().lower())
 
 
 class InMemoryPayrollRepository:
@@ -147,6 +162,7 @@ class SpreadsheetPayrollRepository:
         self._workbook_path = Path(workbook_path)
         self._cached_by_employee: dict[str, PayrollSnapshot] | None = None
         self._cached_mtime_ns: int | None = None
+        self._lock = RLock()
 
     def get_latest_snapshot(self, employee_id: str) -> PayrollSnapshot | None:
         return self._load_snapshots().get(employee_id)
@@ -155,11 +171,12 @@ class SpreadsheetPayrollRepository:
         return set(self._load_snapshots())
 
     def _load_snapshots(self) -> dict[str, PayrollSnapshot]:
-        mtime_ns = self._workbook_path.stat().st_mtime_ns
-        if self._cached_by_employee is None or self._cached_mtime_ns != mtime_ns:
-            self._cached_by_employee = self._read_workbook()
-            self._cached_mtime_ns = mtime_ns
-        return self._cached_by_employee
+        with self._lock:
+            mtime_ns = self._workbook_path.stat().st_mtime_ns
+            if self._cached_by_employee is None or self._cached_mtime_ns != mtime_ns:
+                self._cached_by_employee = self._read_workbook()
+                self._cached_mtime_ns = mtime_ns
+            return self._cached_by_employee
 
     def _read_workbook(self) -> dict[str, PayrollSnapshot]:
         if not self._workbook_path.exists():
@@ -448,16 +465,39 @@ class InMemoryTicketRepository:
 
 class InMemoryMetricsRepository:
     def __init__(self) -> None:
-        self._events: list[dict[str, float | str]] = []
+        self._lock = Lock()
+        self._counts: Counter[str] = Counter()
+        self._total_interactions = 0
+        self._total_response_time = 0.0
 
     def record_interaction(self, outcome: str, response_time: float) -> None:
-        self._events.append({"outcome": outcome, "response_time": max(response_time, 0.0)})
+        with self._lock:
+            self._counts[outcome] += 1
+            self._total_interactions += 1
+            self._total_response_time += max(response_time, 0.0)
+
+    def reset(self) -> None:
+        with self._lock:
+            self._counts.clear()
+            self._total_interactions = 0
+            self._total_response_time = 0.0
 
     def get_summary(self) -> MetricsSummary:
-        total = len(self._events)
+        with self._lock:
+            total = self._total_interactions
+            automated = int(self._counts["automated"])
+            handoff = int(self._counts["handoff"])
+            offer = int(self._counts["offer"])
+            error = int(self._counts["error"])
+            average_response = (self._total_response_time / total) if total else 0.0
+
         if total == 0:
             return MetricsSummary(
                 total_interactions=0,
+                automated_interactions=0,
+                handoff_interactions=0,
+                offer_interactions=0,
+                error_interactions=0,
                 deflection_rate=0.0,
                 average_response_time=0.0,
                 error_rate=0.0,
@@ -465,14 +505,12 @@ class InMemoryMetricsRepository:
                 offer_rate=0.0,
             )
 
-        automated = sum(1 for event in self._events if event["outcome"] == "automated")
-        handoff = sum(1 for event in self._events if event["outcome"] == "handoff")
-        error = sum(1 for event in self._events if event["outcome"] == "error")
-        offer = sum(1 for event in self._events if event["outcome"] == "offer")
-        average_response = sum(float(event["response_time"]) for event in self._events) / total
-
         return MetricsSummary(
             total_interactions=total,
+            automated_interactions=automated,
+            handoff_interactions=handoff,
+            offer_interactions=offer,
+            error_interactions=error,
             deflection_rate=automated / total,
             average_response_time=average_response,
             error_rate=error / total,
