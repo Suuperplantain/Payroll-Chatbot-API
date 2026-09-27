@@ -1,143 +1,42 @@
-﻿# Payroll Pilot Assistant
+# Payroll Pilot Assistant
 
-Payroll Pilot Assistant is a backend payroll chatbot API that answers supported payroll questions from an Excel payslip dataset.
+A small Python API demo for answering common questions about a payslip. It reads payroll fields from an Excel workbook, checks the employee ID, routes supported questions to a rule-based handler, and asks before recording an unsupported query for HR.
 
-The system is designed to:
-- authenticate employees by `employee_id` or demo token,
-- answer payroll-value questions from the dataset,
-- return the latest payslip for an employee when multiple payslip rows exist,
-- and offer HR handoff for unsupported questions.
+## Run locally
 
-## Current Status
-
-This project is currently in progress.
-
-## What The Backend Does
-
-The backend currently supports these payroll query types:
-- full payslip summary
-- employee details
-- tax code
-- pay date
-- pay period
-- gross salary
-- net pay
-- PAYE tax
-- National Insurance
-- pension
-- student loan
-- healthcare scheme
-- total deductions
-
-If a user asks something outside those supported payroll queries, the chatbot responds politely and asks whether the user would like to be put in touch with HR. If the user confirms, the request is stored in the HR request database.
-
-## Data Sources
-
-### Payroll Data
-
-Payroll answers come from `payslip.xlsx`.
-
-The workbook is expected to use a row-based format with these columns:
-- `employee_id`
-- `employee_name`
-- `job_title`
-- `pay_period`
-- `pay_date`
-- `tax_code`
-- `gross_salary`
-- `paye_tax`
-- `national_insurance`
-- `pension`
-- `student_loan`
-- `healthcare_scheme`
-- `net_pay`
-
-Optional column:
-- `total_deductions`
-
-If `total_deductions` is blank, the backend calculates it from the deduction fields.
-
-### HR Request Database
-
-Confirmed HR handoff requests are stored in `hr_requests.db`.
-
-The database stores:
-- `employee_id`
-- `hr_query`
-- `sent_at`
-
-## API Endpoints
-
-### `GET /api/health`
-Returns the API health status.
-
-### `POST /api/chat`
-Authenticates the user and processes payroll chatbot messages.
-
-Response fields:
-- `status`
-- `route`
-- `message`
-- `data`
-- `awaiting_confirmation`
-
-Possible routes:
-- `payroll`
-- `security`
-- `request`
-- `hr_offer`
-- `hr_escalation`
-
-### `GET /api/metrics`
-Returns backend interaction metrics:
-- `deflection_rate`
-- `average_response_time`
-- `error_rate`
-- `handoff_rate`
-- `offer_rate`
-
-## Authentication
-
-The backend authorizes employee IDs found in the spreadsheet.
-
-Demo tokens follow this format:
-
-```text
-token-<employee_id>
-```
-
-Unauthorized requests return a `401` response.
-
-## Run
+Requires Python 3.10 or newer. The API and tests use only the Python standard library.
 
 ```bash
 python app.py
 ```
 
-The API runs on:
+The server listens on `http://localhost:8000`.
 
-```text
-http://localhost:8000
-```
-
-## Test
+Run the tests from the repository root:
 
 ```bash
-python -m unittest discover -s tests -p 'test_*.py'
+python -m unittest discover -s tests -v
 ```
 
-## Project Structure
+## API
+
+- `GET /api/health` — health status
+- `GET /api/metrics` — interaction totals and rates
+- `POST /api/chat` — answer a supported payslip question or offer an HR handoff
+
+The chat endpoint accepts an `employee_id` and `message`. For a local demonstration, it also accepts `token-<employee_id>` as a token. This is a simple coursework authentication stub, not production authentication.
+
+## Project layout
 
 ```text
-app.py
-payslip.xlsx
-hr_requests.db
-src/payroll_support/
-tests/
+app.py                         HTTP API entry point
+src/payroll_support/           Chat service, intent engine, auth, and repositories
+tests/                         Service and HTTP API tests
+payslip.xlsx                   Workbook used by the local demo
 ```
 
-## Notes
+The application creates `hr_requests.db` locally when an HR handoff is confirmed; the database is ignored by Git. Keep real employee or payroll data out of this repository.
 
-- This is an API-only backend. The `web/` folder is not used by the current backend server.
-- The chatbot does not guess answers outside the supported payroll fields.
-- HR requests are only stored after the user confirms they want to be put in touch with HR.
+## Current scope
+
+Supported queries cover payslip summaries, employee details, tax code, pay date and period, gross and net pay, and common deductions. Unsupported questions are offered for HR follow-up, and a request is saved only after the user confirms.
