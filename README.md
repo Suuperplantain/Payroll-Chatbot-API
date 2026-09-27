@@ -24,7 +24,7 @@ python -m unittest discover -s tests -v
 - `GET /api/metrics` — interaction totals and rates
 - `POST /api/chat` — answer a supported payslip question or offer an HR handoff
 
-The chat endpoint accepts an `employee_id` and `message`. For a local demonstration, it also accepts `token-<employee_id>` as a token. This is a simple coursework authentication stub, not production authentication.
+The chat endpoint accepts an `employee_id` and `message`. For a local demonstration, it also accepts `token-<employee_id>` as a token. This is a simple authentication stub, not production authentication.
 
 ## Project layout
 
