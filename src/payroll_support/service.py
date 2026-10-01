@@ -84,6 +84,7 @@ class PayrollSupportService:
 
         pending_handoff = self._pending_handoffs.get(employee_id)
         normalized_message = self._normalize_message(message)
+        # Create a ticket only after the employee confirms the pending handoff.
         if pending_handoff is not None:
             if normalized_message in self._yes_responses:
                 del self._pending_handoffs[employee_id]
